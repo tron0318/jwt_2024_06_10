@@ -18,6 +18,9 @@ import org.springframework.security.core.userdetails.User;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Optional;
+
+import static org.springframework.util.MimeTypeUtils.APPLICATION_JSON_VALUE;
 
 @RestController
 @RequiredArgsConstructor
@@ -28,22 +31,21 @@ public class ArticleController {
 
     @AllArgsConstructor
     @Getter
-    public static class ArticleResponses {
+    public static class ArticlesResponse {
         private final List<Article> articles;
     }
 
     @GetMapping(value = "")
-    @Operation(summary = "게시물들")
-    public RsData<ArticleResponses> articles(){
+    @Operation(summary = "다건조회")
+    public RsData<ArticlesResponse> articles(){
         List<Article> articles = articleService.findAll();
 
         return RsData.of(
                 "S-1",
                 "성공",
-                new ArticleResponses(articles)
+                new ArticlesResponse(articles)
         );
     }
-
 
     @AllArgsConstructor
     @Getter
@@ -51,7 +53,7 @@ public class ArticleController {
         private final Article article;
     }
 
-    @GetMapping(value = "{id}")
+    @GetMapping(value = "/{id}")
     @Operation(summary = "단건조회")
     public RsData<ArticleResponse> article(@PathVariable("id") Long id){
         return articleService.findById(id).map(article -> RsData.of(
@@ -60,14 +62,13 @@ public class ArticleController {
                 new ArticleResponse(article)
         )).orElseGet(() -> RsData.of(
                 "F-1",
-                "%d번 게시물은 존재하지않습니다.".formatted(id),
+                "%d번 게시물은 존재하지 않습니다.".formatted(id),
                 null
         ));
-
     }
 
     @Data
-    public static class WriteRequest{
+    public static class WriteRequest {
         @NotBlank
         private String subject;
 
@@ -77,7 +78,7 @@ public class ArticleController {
 
     @AllArgsConstructor
     @Getter
-    public static class WriteResponse{
+    public static class WriteResponse {
         private final Article article;
     }
 
@@ -90,12 +91,57 @@ public class ArticleController {
         Member member = memberService.findByUsername(user.getUsername()).orElseThrow();
         RsData<Article> writeRs = articleService.write(member, writeRequest.getSubject(), writeRequest.getContent());
 
-        if( writeRs.isFail()) return (RsData) writeRs;
+        if ( writeRs.isFail()) return (RsData) writeRs;
 
         return RsData.of(
                 writeRs.getResultCode(),
                 writeRs.getMsg(),
                 new WriteResponse(writeRs.getData())
+        );
+    }
+
+    @Data
+    public static class ModifyRequest {
+        @NotBlank
+        private String subject;
+
+        @NotBlank
+        private String content;
+    }
+
+    @AllArgsConstructor
+    @Getter
+    public static class ModifyResponse {
+        private final Article article;
+    }
+
+    @PatchMapping(value = "/{id}", consumes = APPLICATION_JSON_VALUE)
+    @Operation(summary = "수정", security = @SecurityRequirement(name = "bearerAuth"))
+    public RsData<ModifyResponse> modify(
+            @AuthenticationPrincipal User user,
+            @Valid @RequestBody ModifyRequest modifyRequest,
+            @PathVariable("id") Long id
+    ){
+        Member member = memberService.findByUsername(user.getUsername()).orElseThrow();
+
+        Optional<Article> opArticle = articleService.findById(id);
+
+        if (opArticle.isEmpty()) return RsData.of(
+                "F-1",
+                "%d번 게시물은 존재하지 않습니다.".formatted(id),
+                null
+        );
+
+        RsData canModifyRs = articleService.canModify(member, opArticle.get());
+
+        if ( canModifyRs.isFail() ) return canModifyRs;
+
+        RsData<Article> modifyRs = articleService.modify(opArticle.get(), modifyRequest.getSubject(), modifyRequest.getContent());
+
+        return RsData.of(
+                modifyRs.getResultCode(),
+                modifyRs.getMsg(),
+                new ModifyResponse(modifyRs.getData())
         );
     }
 }
